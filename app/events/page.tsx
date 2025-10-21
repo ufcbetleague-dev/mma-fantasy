@@ -1,64 +1,74 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabaseClient';
-
-interface Event {
-  id: string;
-  name: string;
-  event_date: string;
-  is_active: boolean;
-  max_picks?: number;
-  total_stake_cents?: number;
-}
+import { supabase } from '@/lib/supabaseClient';
 
 export default function EventsPage() {
-  const [events, setEvents] = useState<Event[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Fetch events from Supabase
   useEffect(() => {
-    async function loadEvents() {
-      const { data, error } = await supabase
-        .from('events')
-        .select('*')
-        .order('event_date', { ascending: true });
+    const fetchEvents = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('ufc_events')
+          .select('*')
+          .order('event_date', { ascending: true });
 
-      console.log('Supabase data:', data);
-      console.log('Supabase error:', error);
-
-      if (error) {
-        console.error('Error loading events:', error);
-        setEvents([]);
-      } else {
+        if (error) throw error;
         setEvents(data || []);
+      } catch (err) {
+        console.error('Error loading events:', err);
+      } finally {
+        setLoading(false);
       }
+    };
 
-      setLoading(false);
-    }
-
-    loadEvents();
+    fetchEvents();
   }, []);
 
   if (loading) {
-    return <p className="p-6 text-center">Loading events...</p>;
-  }
-
-  if (events.length === 0) {
-    return <p className="p-6 text-center">No events found.</p>;
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-black text-white">
+        <h2 className="text-2xl font-semibold">Loading UFC Events...</h2>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 text-white">
-      <h1 className="text-2xl font-bold mb-4">Upcoming Events</h1>
-      <ul className="space-y-2">
-        {events.map((event) => (
-          <li key={event.id} className="border p-4 rounded-md bg-gray-800">
-            <h2 className="text-xl">{event.name}</h2>
-            <p>Date: {new Date(event.event_date).toLocaleString()}</p>
-            <p>Status: {event.is_active ? 'Active' : 'Inactive'}</p>
-          </li>
-        ))}
-      </ul>
+    <div className="min-h-screen bg-black text-white p-8">
+      <h1 className="text-3xl font-bold mb-6 text-center">🏆 Upcoming UFC Events</h1>
+
+      {events.length === 0 ? (
+        <p className="text-center text-gray-400">
+          No events found. Try syncing again from the homepage.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-lg hover:shadow-red-500/40 transition"
+            >
+              <h2 className="text-xl font-semibold mb-2 text-red-400">
+                {event.name || 'Unnamed Event'}
+              </h2>
+              <p className="text-sm text-gray-300">
+                📅 {new Date(event.event_date).toLocaleString()}
+              </p>
+              {event.home_team && event.away_team && (
+                <p className="text-gray-400 mt-2">
+                  🥊 {event.home_team} vs {event.away_team}
+                </p>
+              )}
+              <p className="text-gray-500 text-xs mt-2">
+                Bookmakers: {event.bookmakers || 0}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
