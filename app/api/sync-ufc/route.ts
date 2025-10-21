@@ -1,48 +1,42 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 
-const UFC_EVENTS_API = 'https://api.sportsdata.io/v4/mma/scores/json/Schedule/UFC';
+const ODDS_API_URL = 'https://api.the-odds-api.com/v4/sports/mma_mixed_martial_arts/events';
 
 export async function GET() {
   try {
-    // Fetch all UFC events from SportsData.io
-    const res = await fetch(`${UFC_EVENTS_API}?key=${process.env.ODDS_API_KEY}`);
+    // Fetch upcoming MMA (UFC) events from The Odds API
+    const response = await fetch(`${ODDS_API_URL}?apiKey=${process.env.ODDS_API_KEY}&regions=us`);
 
-    if (!res.ok) {
-      throw new Error(`UFC API request failed with status ${res.status}`);
+    if (!response.ok) {
+      throw new Error(`The Odds API request failed with status ${response.status}`);
     }
 
-    const events = await res.json();
+    const events = await response.json();
 
-    if (!Array.isArray(events)) {
-      throw new Error('Unexpected API response format.');
+    if (!Array.isArray(events) || events.length === 0) {
+      throw new Error('No UFC events returned from The Odds API.');
     }
 
-    // Filter for future (upcoming) events only
-    const upcoming = events.filter((event: any) => {
-      const eventDate = new Date(event.Day);
-      return eventDate >= new Date();
-    });
+    // Format and save events in Supabase
+    const formattedEvents = events.map((event: any) => ({
+      id: event.id,
+      name: event.sport_title,
+      event_date: event.commence_time,
+      home_team: event.home_team,
+      away_team: event.away_team,
+      bookmakers: event.bookmakers?.length || 0,
+    }));
 
-    // Insert or update them in Supabase
     const { data, error } = await supabase
       .from('ufc_events')
-      .upsert(
-        upcoming.map((event: any) => ({
-          id: event.EventId,
-          name: event.Name,
-          date: event.Day,
-          location: event.Location,
-          status: event.Status,
-        })),
-        { onConflict: 'id' }
-      );
+      .upsert(formattedEvents, { onConflict: 'id' });
 
     if (error) throw error;
 
     return NextResponse.json({
       success: true,
-      count: data ? data.length : 0,
+      count: formattedEvents.length,
     });
   } catch (err: any) {
     console.error('❌ Error syncing UFC events:', err.message);
