@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 
-const UFC_EVENTS_API = 'https://api.sportsdata.io/v4/mma/scores/json/UpcomingEvents';
+const UFC_EVENTS_API = 'https://api.sportsdata.io/v4/mma/scores/json/Schedule/UFC';
 
 export async function GET() {
   try {
-    // Fetch upcoming UFC events from the SportsData API
+    // Fetch all UFC events from SportsData.io
     const res = await fetch(`${UFC_EVENTS_API}?key=${process.env.ODDS_API_KEY}`);
 
     if (!res.ok) {
@@ -15,14 +15,20 @@ export async function GET() {
     const events = await res.json();
 
     if (!Array.isArray(events)) {
-      throw new Error('Unexpected API response format');
+      throw new Error('Unexpected API response format.');
     }
 
-    // Upsert events into Supabase (ignore type warnings)
+    // Filter for future (upcoming) events only
+    const upcoming = events.filter((event: any) => {
+      const eventDate = new Date(event.Day);
+      return eventDate >= new Date();
+    });
+
+    // Insert or update them in Supabase
     const { data, error } = await supabase
       .from('ufc_events')
       .upsert(
-        events.map((event: any) => ({
+        upcoming.map((event: any) => ({
           id: event.EventId,
           name: event.Name,
           date: event.Day,
