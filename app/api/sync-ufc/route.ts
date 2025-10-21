@@ -1,37 +1,48 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 
-// Public FightOdds.io endpoint for upcoming UFC events
-const FIGHTODDS_URL = 'https://fightodds.io/api/events';
+const UFC_EVENTS_API = 'https://api.sportsdata.io/v4/mma/scores/json/UpcomingEvents';
 
 export async function GET() {
   try {
-    const res = await fetch(FIGHTODDS_URL);
-    if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+    // Fetch upcoming UFC events from the SportsData API
+    const res = await fetch(`${UFC_EVENTS_API}?key=${process.env.ODDS_API_KEY}`);
+
+    if (!res.ok) {
+      throw new Error(`UFC API request failed with status ${res.status}`);
+    }
 
     const events = await res.json();
 
-    // Filter for UFC events only
-    const ufcEvents = events.filter((ev: any) => ev.organization === 'UFC');
-
-    console.log(`✅ Found ${ufcEvents.length} UFC events`);
-
-    for (const ev of ufcEvents) {
-      const { error } = await supabase
-        .from('events')
-        .upsert({
-          name: ev.name || ev.title,
-          event_date: ev.date,
-          is_active: true,
-        })
-        .select();
-
-      if (error) console.error('❌ Error inserting event:', error);
+    if (!Array.isArray(events)) {
+      throw new Error('Unexpected API response format');
     }
 
-    return NextResponse.json({ success: true, count: ufcEvents.length });
+    // Upsert events into Supabase (ignore type warnings)
+    const { data, error } = await supabase
+      .from('ufc_events')
+      .upsert(
+        events.map((event: any) => ({
+          id: event.EventId,
+          name: event.Name,
+          date: event.Day,
+          location: event.Location,
+          status: event.Status,
+        })),
+        { onConflict: 'id' }
+      );
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      count: data ? data.length : 0,
+    });
   } catch (err: any) {
-    console.error('❌ UFC Sync Error:', err.message);
-    return NextResponse.json({ error: 'Failed to fetch UFC data' }, { status: 500 });
+    console.error('❌ Error syncing UFC events:', err.message);
+    return NextResponse.json(
+      { success: false, error: err.message },
+      { status: 500 }
+    );
   }
 }
