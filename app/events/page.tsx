@@ -40,6 +40,16 @@ export default function EventsPage() {
     <div className="min-h-screen bg-black text-white p-8">
       <h1 className="text-3xl font-bold mb-6 text-center">🏆 Upcoming UFC Events</h1>
 
+      {/* Back to Home Button */}
+      <div className="text-center mb-8">
+        <a
+          href="/"
+          className="inline-block bg-gray-800 hover:bg-gray-700 text-white text-sm font-medium py-2 px-4 rounded-lg border border-gray-600 hover:border-red-500 transition-all duration-200"
+        >
+          ← Back to Home
+        </a>
+      </div>
+
       {events.length === 0 ? (
         <p className="text-center text-gray-400">
           No events found. Try syncing again from the homepage.
