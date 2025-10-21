@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/sync-ufc",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/sync-odds",
+      "schedule": "0 13 * * *"
+    }
+  ]
+}
