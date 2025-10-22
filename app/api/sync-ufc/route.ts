@@ -5,51 +5,39 @@ export async function GET() {
   try {
     console.log("🔄 Syncing UFC events...");
 
-    // Fetch all MMA events from The Odds API
+    // Fetch all events from the API
     const response = await fetch(
-      `https://api.the-odds-api.com/v4/sports/mma_mixed_martial_arts/odds/?regions=us&markets=h2h&apiKey=${process.env.ODDS_API_KEY}`
+      "https://api.the-odds-api.com/v4/sports/mma_mixed_martial_arts/odds/?apiKey=" + process.env.ODDS_API_KEY
     );
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch events: ${response.statusText}`);
-    }
-
     const data = await response.json();
 
-    if (!Array.isArray(data) || data.length === 0) {
-      return NextResponse.json({
-        success: false,
-        message: "No events found from Odds API.",
-      });
+    if (!data || data.length === 0) {
+      console.warn("⚠️ No UFC events found from API");
+      return NextResponse.json({ success: false, message: "No UFC events found" });
     }
 
-    // Helper to clean event names
-    const normalize = (str: string) =>
-      str.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+    // Deduplicate by event title
+    const uniqueEventsMap = new Map();
+    data.forEach((item: any) => {
+      const eventName = item.sport_title || "MMA Event";
+      const eventDate = item.commence_time;
+      const eventId = item.id;
 
-    // Transform data for your ufc_events table
-    const eventRows = data.map((event: any) => ({
-      name: event.title || event.sport_title || "UFC Event",
-      event_date: event.commence_time
-        ? new Date(event.commence_time).toISOString()
-        : new Date().toISOString(),
-      sport: "MMA",
-    }));
+      if (!uniqueEventsMap.has(eventName)) {
+        uniqueEventsMap.set(eventName, {
+          id: eventId,
+          name: eventName,
+          event_date: eventDate,
+        });
+      }
+    });
 
-    // Deduplicate by event name + date
-    const uniqueEvents = Array.from(
-      new Map(
-        eventRows.map((e) => [
-          `${normalize(e.name)}_${e.event_date.slice(0, 10)}`,
-          e,
-        ])
-      ).values()
-    );
+    const uniqueEvents = Array.from(uniqueEventsMap.values());
 
-    // Insert or update events into Supabase
+    // Insert or update events in Supabase
     const { error: insertError } = await supabase
       .from("ufc_events")
-      .upsert(uniqueEvents, { onConflict: "name,event_date" });
+      .upsert(uniqueEvents, { onConflict: "id" });
 
     if (insertError) throw insertError;
 
@@ -61,10 +49,11 @@ export async function GET() {
     });
   } catch (err: any) {
     console.error("❌ Error syncing UFC events:", err);
-    return NextResponse.json(
-      { success: false, error: err.message },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: err.message,
+      status: 500,
+    });
   }
 }
 

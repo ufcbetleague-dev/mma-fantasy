@@ -1,112 +1,105 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabaseClient";
 
-// Fetch fights from The Odds API and link to UFC events
 export async function GET() {
   try {
-    console.log("🔄 Syncing UFC fights...");
+    console.log("🔄 Syncing fights...");
 
-    // Fetch fights from The Odds API (same sport key as /sync-ufc)
+    // Fetch all MMA fight data from Odds API
     const response = await fetch(
-      `https://api.the-odds-api.com/v4/sports/mma_mixed_martial_arts/odds/?regions=us&markets=h2h&apiKey=${process.env.ODDS_API_KEY}`
+      "https://api.the-odds-api.com/v4/sports/mma_mixed_martial_arts/odds/?apiKey=" +
+        process.env.ODDS_API_KEY
     );
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch fights: ${response.statusText}`);
-    }
-
     const data = await response.json();
 
-    // Fetch events from Supabase (these were created by /sync-ufc)
-    const { data: events, error: eventsError } = await supabase
-      .from("ufc_events")
-      .select("id, name, event_date");
-
-    if (eventsError) throw eventsError;
-
-    // Helper to normalize names for fuzzy matching
-    const normalize = (str: string) => {
-      return str.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
-    };
-
-    const fightRows: any[] = [];
-
-    // Loop through all fight events from the API
-    for (const event of data) {
-      const apiEventName = normalize(event.title || event.sport_title || "");
-
-      // Try to find the matching event in Supabase
-      let matchedEvent =
-        events.find((e) => normalize(e.name) === apiEventName) ||
-        events.find((e) => normalize(e.name).includes(apiEventName)) ||
-        null;
-
-      // Try matching by "UFC ###" number if names don't align
-      if (!matchedEvent) {
-        const match = apiEventName.match(/ufc\s?\d+/);
-        if (match) {
-          matchedEvent = events.find((e) =>
-            normalize(e.name).includes(match[0])
-          );
-        }
-      }
-
-      if (!matchedEvent) {
-        console.log(`⚠️ No event match for: ${event.title}`);
-        continue; // Skip if we can’t match an event
-      }
-
-      // Extract fighter and odds info
-      const market = event.bookmakers?.[0]?.markets?.[0];
-      const outcomes = market?.outcomes || [];
-      if (outcomes.length < 2) continue;
-
-      const fight = {
-        event_id: matchedEvent.id,
-        fighter1_name: outcomes[0].name,
-        fighter2_name: outcomes[1].name,
-        fighter1_odds: outcomes[0].price,
-        fighter2_odds: outcomes[1].price,
-        winner: null,
-      };
-
-      fightRows.push(fight);
+    if (!data || data.length === 0) {
+      console.warn("⚠️ No fight data found");
+      return NextResponse.json({ success: false, message: "No fight data found" });
     }
 
-    // Deduplicate by event_id + fighter names
+    // Get all UFC events from Supabase (to match fights to events)
+    const { data: events, error: eventError } = await supabase
+      .from("ufc_events")
+      .select("id, name");
+
+    if (eventError) throw eventError;
+
+    // Helper to normalize event names for matching
+    const normalize = (str: string) =>
+      str?.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+
+    const fights: any[] = [];
+
+    // Loop through each event/fight item from API
+    data.forEach((item: any) => {
+      const eventName = item.sport_title || item.sport_key || "MMA Event";
+
+      // Try to match this fight's event to one in Supabase
+      const matchedEvent = events.find(
+        (e) => normalize(e.name) === normalize(eventName)
+      );
+
+      const event_id = matchedEvent ? matchedEvent.id : null;
+
+      if (!item.bookmakers?.length) return; // skip if no odds
+      const bookmaker = item.bookmakers[0];
+      const markets = bookmaker.markets || [];
+      if (!markets.length) return;
+
+      const outcomes = markets[0].outcomes || [];
+      if (outcomes.length < 2) return; // must have 2 fighters
+
+      const fighter1 = outcomes[0];
+      const fighter2 = outcomes[1];
+
+      // Skip fights that aren’t linked to a valid event
+      if (!event_id) return;
+
+      fights.push({
+        event_id,
+        fighter1_name: fighter1.name,
+        fighter2_name: fighter2.name,
+        fighter1_odds: fighter1.price,
+        fighter2_odds: fighter2.price,
+      });
+    });
+
+    // Remove duplicates (same event + fighters)
     const uniqueFights = Array.from(
       new Map(
-        fightRows.map((f) => [
-          `${f.event_id}_${f.fighter1_name}_${f.fighter2_name}`,
+        fights.map((f) => [
+          `${f.event_id}-${f.fighter1_name}-${f.fighter2_name}`,
           f,
         ])
       ).values()
     );
 
     if (uniqueFights.length === 0) {
-      return NextResponse.json({
-        success: false,
-        message: "No fights found to sync.",
-      });
+      console.warn("⚠️ No fights to insert");
+      return NextResponse.json({ success: false, message: "No fights to insert" });
     }
 
-    // Insert or update fights into Supabase
+    // Insert or update fights in Supabase
     const { error: insertError } = await supabase
       .from("fights")
-      .upsert(uniqueFights, { onConflict: "event_id,fighter1_name,fighter2_name" });
+      .upsert(uniqueFights, {
+        onConflict: "event_id,fighter1_name,fighter2_name",
+      });
 
     if (insertError) throw insertError;
 
     console.log(`✅ Synced ${uniqueFights.length} fights successfully`);
+
     return NextResponse.json({
       success: true,
       count: uniqueFights.length,
     });
   } catch (err: any) {
     console.error("❌ Error syncing fights:", err);
-    return NextResponse.json(
-      { success: false, error: err.message },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: err.message,
+      status: 500,
+    });
   }
 }
